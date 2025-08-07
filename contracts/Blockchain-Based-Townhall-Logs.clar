@@ -9,6 +9,8 @@
 (define-data-var next-decision-id uint u1)
 (define-data-var contract-admin principal CONTRACT-OWNER)
 
+(define-data-var next-proposal-id uint u1)
+
 (define-map authorized-officials principal bool)
 (define-map meeting-records uint {
     title: (string-utf8 256),
@@ -283,3 +285,92 @@
 )
 
 (map-set authorized-officials CONTRACT-OWNER true)
+
+
+
+(define-map citizen-proposals uint {
+    title: (string-utf8 256),
+    description: (string-utf8 1024),
+    proposed-date: uint,
+    proposed-location: (string-utf8 128),
+    proposer: principal,
+    status: (string-ascii 16),
+    submission-date: uint,
+    block-height: uint,
+    supporting-citizens: (list 20 principal)
+})
+
+(define-map proposal-supporters {proposal-id: uint, supporter: principal} bool)
+
+(define-read-only (get-citizen-proposal (proposal-id uint))
+    (map-get? citizen-proposals proposal-id)
+)
+
+(define-read-only (get-next-proposal-id)
+    (var-get next-proposal-id)
+)
+
+(define-read-only (has-supported-proposal (proposal-id uint) (citizen principal))
+    (default-to false (map-get? proposal-supporters {proposal-id: proposal-id, supporter: citizen}))
+)
+
+(define-public (submit-meeting-proposal 
+    (title (string-utf8 256))
+    (description (string-utf8 1024))
+    (proposed-date uint)
+    (proposed-location (string-utf8 128))
+)
+    (let (
+        (proposal-id (var-get next-proposal-id))
+        (current-height stacks-block-height)
+    )
+        (asserts! (> (len title) u0) ERR-INVALID-INPUT)
+        (asserts! (> (len description) u0) ERR-INVALID-INPUT)
+        (asserts! (> proposed-date u0) ERR-INVALID-INPUT)
+        (asserts! (> (len proposed-location) u0) ERR-INVALID-INPUT)
+        (map-set citizen-proposals proposal-id {
+            title: title,
+            description: description,
+            proposed-date: proposed-date,
+            proposed-location: proposed-location,
+            proposer: tx-sender,
+            status: "pending",
+            submission-date: current-height,
+            block-height: current-height,
+            supporting-citizens: (list tx-sender)
+        })
+        (map-set proposal-supporters {proposal-id: proposal-id, supporter: tx-sender} true)
+        (var-set next-proposal-id (+ proposal-id u1))
+        (ok proposal-id)
+    )
+)
+
+(define-public (support-proposal (proposal-id uint))
+    (let (
+        (proposal (unwrap! (map-get? citizen-proposals proposal-id) ERR-NOT-FOUND))
+        (current-supporters (get supporting-citizens proposal))
+    )
+        (asserts! (is-eq (get status proposal) "pending") ERR-INVALID-INPUT)
+        (asserts! (not (has-supported-proposal proposal-id tx-sender)) ERR-ALREADY-EXISTS)
+        (asserts! (< (len current-supporters) u20) ERR-INVALID-INPUT)
+        (map-set proposal-supporters {proposal-id: proposal-id, supporter: tx-sender} true)
+        (map-set citizen-proposals proposal-id
+            (merge proposal {supporting-citizens: (unwrap! (as-max-len? (append current-supporters tx-sender) u20) ERR-INVALID-INPUT)})
+        )
+        (ok true)
+    )
+)
+
+(define-public (review-proposal (proposal-id uint) (new-status (string-ascii 16)))
+    (let (
+        (proposal (unwrap! (map-get? citizen-proposals proposal-id) ERR-NOT-FOUND))
+    )
+        (asserts! (is-authorized-official tx-sender) ERR-UNAUTHORIZED)
+        (asserts! (is-eq (get status proposal) "pending") ERR-INVALID-INPUT)
+        (asserts! (or (is-eq new-status "approved") (or (is-eq new-status "rejected") (is-eq new-status "under-review"))) ERR-INVALID-INPUT)
+        (map-set citizen-proposals proposal-id
+            (merge proposal {status: new-status})
+        )
+        (ok true)
+    )
+)
