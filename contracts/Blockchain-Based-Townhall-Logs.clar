@@ -374,3 +374,106 @@
         (ok true)
     )
 )
+
+(define-map meeting-analytics uint {
+    total-invited: uint,
+    total-attended: uint,
+    decisions-made: uint,
+    avg-decision-time: uint,
+    participation-score: uint,
+    efficiency-rating: uint
+})
+
+(define-data-var analytics-enabled bool true)
+
+(define-read-only (get-meeting-analytics (meeting-id uint))
+    (map-get? meeting-analytics meeting-id)
+)
+
+(define-read-only (calculate-attendance-rate (meeting-id uint))
+    (let (
+        (analytics (map-get? meeting-analytics meeting-id))
+    )
+        (if (is-some analytics)
+            (let (
+                (data (unwrap-panic analytics))
+                (invited (get total-invited data))
+                (attended (get total-attended data))
+            )
+                (if (> invited u0)
+                    (some (/ (* attended u100) invited))
+                    none
+                )
+            )
+            none
+        )
+    )
+)
+
+(define-read-only (get-efficiency-metrics (meeting-id uint))
+    (let (
+        (analytics (map-get? meeting-analytics meeting-id))
+    )
+        (if (is-some analytics)
+            (let (
+                (data (unwrap-panic analytics))
+            )
+                (some {
+                    attendance-rate: (default-to u0 (calculate-attendance-rate meeting-id)),
+                    decisions-made: (get decisions-made data),
+                    avg-decision-time: (get avg-decision-time data),
+                    participation-score: (get participation-score data),
+                    efficiency-rating: (get efficiency-rating data)
+                })
+            )
+            none
+        )
+    )
+)
+
+(define-public (generate-meeting-analytics (meeting-id uint))
+    (let (
+        (meeting (unwrap! (map-get? meeting-records meeting-id) ERR-NOT-FOUND))
+        (participants (get participants meeting))
+        (total-invited (len participants))
+        (decisions-for-meeting (get-decisions-count meeting-id)))
+        (asserts! (is-authorized-official tx-sender) ERR-UNAUTHORIZED)
+        (asserts! (is-eq (get status meeting) "closed") ERR-INVALID-INPUT)
+        (let (
+            (attended-count (count-attendees meeting-id))
+            (participation (calculate-participation-score meeting-id))
+            (efficiency (calculate-efficiency-rating decisions-for-meeting attended-count))
+        )
+            (map-set meeting-analytics meeting-id {
+                total-invited: total-invited,
+                total-attended: attended-count,
+                decisions-made: decisions-for-meeting,
+                avg-decision-time: u24,
+                participation-score: participation,
+                efficiency-rating: efficiency
+            })
+            (ok true)
+        )
+    )
+)
+
+(define-private (count-attendees (meeting-id uint))
+    u0
+)
+
+(define-private (get-decisions-count (meeting-id uint))
+    u0
+)
+
+(define-private (calculate-participation-score (meeting-id uint))
+    u75
+)
+
+(define-private (calculate-efficiency-rating (decisions uint) (attendees uint))
+    (if (> attendees u0)
+        (let ((score (* decisions u20)))
+            (if (> score u100) u100 score)
+        )
+        u0
+    )
+)
