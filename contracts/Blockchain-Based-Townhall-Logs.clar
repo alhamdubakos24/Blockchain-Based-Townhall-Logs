@@ -477,3 +477,90 @@
         u0
     )
 )
+
+(define-map official-reputation principal {
+    meetings-attended: uint,
+    meetings-organized: uint,
+    votes-cast: uint,
+    proposals-created: uint,
+    total-meetings: uint,
+    reputation-score: uint,
+    last-updated: uint
+})
+
+(define-data-var reputation-enabled bool true)
+
+(define-read-only (get-official-reputation (official principal))
+    (map-get? official-reputation official)
+)
+
+(define-read-only (calculate-reputation-score (official principal))
+    (let (
+        (rep-data (map-get? official-reputation official))
+    )
+        (if (is-some rep-data)
+            (let (
+                (data (unwrap-panic rep-data))
+                (meetings-attended (get meetings-attended data))
+                (meetings-organized (get meetings-organized data))
+                (votes-cast (get votes-cast data))
+                (total-meetings (get total-meetings data))
+            )
+                (if (> total-meetings u0)
+                    (let (
+                        (attendance-score (/ (* meetings-attended u40) total-meetings))
+                        (organization-score (* meetings-organized u20))
+                        (voting-score (* votes-cast u15))
+                        (total-score (+ (+ attendance-score organization-score) voting-score))
+                    )
+                        (if (> total-score u100) u100 total-score)
+                    )
+                    u0
+                )
+            )
+            u0
+        )
+    )
+)
+
+(define-public (update-reputation-attendance (official principal) (meeting-id uint))
+    (let (
+        (current-rep (default-to {meetings-attended: u0, meetings-organized: u0, votes-cast: u0, proposals-created: u0, total-meetings: u0, reputation-score: u0, last-updated: u0} (map-get? official-reputation official)))
+        (current-height stacks-block-height)
+    )
+        (asserts! (is-authorized-official tx-sender) ERR-UNAUTHORIZED)
+        (asserts! (is-some (map-get? meeting-records meeting-id)) ERR-NOT-FOUND)
+        (let (
+            (updated-rep (merge current-rep {
+                meetings-attended: (+ (get meetings-attended current-rep) u1),
+                total-meetings: (+ (get total-meetings current-rep) u1),
+                last-updated: current-height
+            }))
+        )
+            (map-set official-reputation official
+                (merge updated-rep {reputation-score: (calculate-reputation-score official)})
+            )
+            (ok true)
+        )
+    )
+)
+
+(define-public (update-reputation-vote (official principal))
+    (let (
+        (current-rep (default-to {meetings-attended: u0, meetings-organized: u0, votes-cast: u0, proposals-created: u0, total-meetings: u0, reputation-score: u0, last-updated: u0} (map-get? official-reputation official)))
+        (current-height stacks-block-height)
+    )
+        (asserts! (is-authorized-official tx-sender) ERR-UNAUTHORIZED)
+        (let (
+            (updated-rep (merge current-rep {
+                votes-cast: (+ (get votes-cast current-rep) u1),
+                last-updated: current-height
+            }))
+        )
+            (map-set official-reputation official
+                (merge updated-rep {reputation-score: (calculate-reputation-score official)})
+            )
+            (ok true)
+        )
+    )
+)
