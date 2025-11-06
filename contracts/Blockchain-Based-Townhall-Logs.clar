@@ -564,3 +564,77 @@
         )
     )
 )
+
+(define-data-var next-action-id uint u1)
+
+(define-map action-items uint {
+    meeting-id: uint,
+    title: (string-utf8 256),
+    description: (string-utf8 512),
+    assigned-to: principal,
+    created-by: principal,
+    due-date: uint,
+    status: (string-ascii 16),
+    priority: (string-ascii 8),
+    completion-date: uint,
+    verified-by: (optional principal),
+    block-height: uint
+})
+
+(define-read-only (get-action-item (action-id uint))
+    (map-get? action-items action-id)
+)
+
+(define-read-only (get-next-action-id)
+    (var-get next-action-id)
+)
+
+(define-public (create-action-item
+    (meeting-id uint)
+    (title (string-utf8 256))
+    (description (string-utf8 512))
+    (assigned-to principal)
+    (due-date uint)
+    (priority (string-ascii 8))
+)
+    (let (
+        (action-id (var-get next-action-id))
+        (current-height stacks-block-height)
+    )
+        (asserts! (is-authorized-official tx-sender) ERR-UNAUTHORIZED)
+        (asserts! (is-some (map-get? meeting-records meeting-id)) ERR-NOT-FOUND)
+        (asserts! (> (len title) u0) ERR-INVALID-INPUT)
+        (asserts! (> due-date current-height) ERR-INVALID-INPUT)
+        (asserts! (or (is-eq priority "high") (or (is-eq priority "medium") (is-eq priority "low"))) ERR-INVALID-INPUT)
+        (map-set action-items action-id {
+            meeting-id: meeting-id,
+            title: title,
+            description: description,
+            assigned-to: assigned-to,
+            created-by: tx-sender,
+            due-date: due-date,
+            status: "open",
+            priority: priority,
+            completion-date: u0,
+            verified-by: none,
+            block-height: current-height
+        })
+        (var-set next-action-id (+ action-id u1))
+        (ok action-id)
+    )
+)
+
+(define-public (complete-action-item (action-id uint))
+    (let (
+        (action (unwrap! (map-get? action-items action-id) ERR-NOT-FOUND))
+        (current-height stacks-block-height)
+    )
+        (asserts! (is-eq tx-sender (get assigned-to action)) ERR-UNAUTHORIZED)
+        (asserts! (is-eq (get status action) "open") ERR-INVALID-INPUT)
+        (map-set action-items action-id (merge action {
+            status: "completed",
+            completion-date: current-height
+        }))
+        (ok true)
+    )
+)
